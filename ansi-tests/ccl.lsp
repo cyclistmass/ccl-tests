@@ -2894,7 +2894,6 @@
           collect (list n text))))
   nil)
 
-<<<<<<< HEAD
 ;;; RECORD-LENGTH accepts a field reference, including one through nested
 ;;; records, and returns the size of the field's type.  (Clozure/ccl b4a7254b)
 (deftest ccl.record-length.field-refs
@@ -2963,7 +2962,7 @@
                    :signed-doubleword 10 :void)
       *ccl-test-nine-doubles-args*)
   (1d0 2d0 3d0 4d0 5d0 6d0 7d0 8d0 9d0 10))
-=======
+
 ;;; With static space above the dynamic heap, the EGC did not forward the
 ;;; data of a tenured population that had once been empty, and the data
 ;;; then pointed into free space.  A child lisp asks for relocated static
@@ -3029,4 +3028,3 @@
           t
           (list result (multiple-value-list (ccl:external-process-status p))))))
   t)
->>>>>>> 1123136 (Add a test for population data with static space above the heap)
