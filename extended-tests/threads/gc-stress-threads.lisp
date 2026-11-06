@@ -18,7 +18,7 @@
 ;;;
 ;;; Prints one line:  GC-STRESS-RESULT :VERDICT v :GCS n :STORES n :DE n
 ;;; and exits 0 only on PASS.  A heap error shows as a crash (a nonzero exit),
-;;; or as :VERDICT BAD-SHAPE.  The caller must kill the run on a timeout.
+;;; or as :VERDICT BAD-SHAPE.  :VERDICT WORKER-ERROR is a Lisp error in a worker.  The caller must kill the run on a timeout.
 
 (defpackage "GC-STRESS" (:use "CL"))
 (in-package "GC-STRESS")
@@ -64,7 +64,7 @@
     ;; Heap consing while v and l are live on the stack.
     (let ((heap (loop repeat 8 collect (make-array 20 :initial-element n))))
       (+ (reduce #'+ v) (sum-list l) (length heap)
-         (apply #'de-rest v)))))
+         (apply #'de-rest l)))))
 
 (defun de-rest (&rest args)
   (declare (dynamic-extent args))
@@ -104,6 +104,17 @@
                (unless (item-ok-p v) (note-bad "table" v)))
              *table*)))
 
+;;; A Lisp error in a worker is a defect of this file or of the lisp, not a
+;;; heap error.  Report it apart from BAD-SHAPE and stop the run.
+(defvar *worker-error* nil)
+(defun guarded (fn)
+  (lambda ()
+    (handler-case (funcall fn)
+      (error (c)
+        (unless *worker-error*
+          (setq *worker-error* (princ-to-string c)))
+        (setq *stop* t)))))
+
 (defvar *count-lock* (ccl:make-lock))
 (defun atomic-incf-de (n) (ccl:with-lock-grabbed (*count-lock*) (incf *de-count* n)))
 (defun atomic-incf-store (n) (ccl:with-lock-grabbed (*count-lock*) (incf *store-count* n)))
@@ -122,23 +133,26 @@
   (ccl:gc)
   (let ((procs '()))
     (dotimes (i *de-workers*)
-      (push (ccl:process-run-function (format nil "de-~d" i) #'de-worker) procs))
+      (push (ccl:process-run-function (format nil "de-~d" i) (guarded #'de-worker)) procs))
     (dotimes (i *store-workers*)
       (let ((seed i))
         (push (ccl:process-run-function (format nil "store-~d" i)
-                                        (lambda () (store-worker seed)))
+                                        (guarded (lambda () (store-worker seed))))
               procs)))
     (dotimes (i *check-workers*)
-      (push (ccl:process-run-function (format nil "check-~d" i) #'check-worker) procs))
+      (push (ccl:process-run-function (format nil "check-~d" i) (guarded #'check-worker)) procs))
     (let ((end (+ (get-universal-time) *duration*)))
-      (loop while (and (< (get-universal-time) end) (null *bad*))
+      (loop while (and (< (get-universal-time) end) (null *bad*) (null *stop*))
             do (sleep 1)))
     (setq *stop* t)
     (dolist (p procs) (ccl:join-process p))
-    (let ((verdict (if *bad* "BAD-SHAPE" "PASS")))
+    (let ((verdict (cond (*worker-error* "WORKER-ERROR")
+                         (*bad* "BAD-SHAPE")
+                         (t "PASS"))))
       (format t "~&GC-STRESS-RESULT :VERDICT ~a :GCS ~a :EGC ~a :STORES ~d :DE ~d~@[ :WHAT ~a~]~%"
-              verdict (gc-count) (ccl:egc-enabled-p) *store-count* *de-count* *bad*)
+              verdict (gc-count) (ccl:egc-enabled-p) *store-count* *de-count*
+              (or *worker-error* *bad*))
       (finish-output)
-      (ccl:quit (if *bad* 1 0)))))
+      (ccl:quit (if (string= verdict "PASS") 0 1)))))
 
 (run)
