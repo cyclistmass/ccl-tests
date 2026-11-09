@@ -18,6 +18,8 @@
         (make-hash-table :test 'eq    :weak (weak-arg :value) :shared t)
         (make-hash-table :test 'equal :weak (weak-arg :value) :shared t)
         (make-hash-table :test 'eql   :weak (weak-arg :value) :shared t)))
+;; "keyonly" keeps only the weak-on-key EQ table.
+(when (flag "keyonly") (setq *tables* (list (first *tables*))))
 (defstruct item tag (payload (make-array 5 :initial-element 0)))
 ;; An item whose payload holds its tag, so ITEM-OK-P can check it.
 (defun mk (tag) (let ((i (make-item :tag tag))) (setf (svref (item-payload i) 0) tag) i))
@@ -43,7 +45,10 @@
   (unless (flag "nocheck")
     (setq ccl::*gc-event-status-bits*
           (logior ccl::*gc-event-status-bits* (ash 1 2))))
-  (format t "~&R1 check ~s weak ~s~%" (logbitp 2 ccl::*gc-event-status-bits*) *weak*)
+  ;; "noegc" turns the ephemeral GC off, so every GC is a full one.
+  (when (flag "noegc") (ccl:egc nil))
+  (format t "~&R1 check ~s weak ~s tables ~d egc ~s~%" (logbitp 2 ccl::*gc-event-status-bits*) *weak*
+          (length *tables*) (ccl:egc-enabled-p))
   (finish-output)
   (dotimes (i 1000) (dolist (h *tables*) (setf (gethash (make-item :tag i) h) (mk i))))
   (ccl:gc)                                        ; tenure the four hash vectors
