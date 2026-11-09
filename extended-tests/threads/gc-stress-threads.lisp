@@ -30,6 +30,18 @@
 (defparameter *slots* 4096)
 
 (defvar *stop* nil)
+
+;;; With a lock here, every store of a fresh item and every read of one
+;;; happens under it.  The lock orders the stores that fill the item before
+;;; the store that publishes it.  Without it, nothing does, and on a weakly
+;;; ordered machine (arm64) a reader can see the new pointer before the
+;;; contents, then see the contents a moment later.  That race belongs to
+;;; this file, not to the GC.  gc-stress-threads-locked.lisp sets the lock.
+(defvar *publish-lock* nil)
+(defmacro published (&body body)
+  `(if *publish-lock*
+       (ccl:with-lock-grabbed (*publish-lock*) ,@body)
+       (progn ,@body)))
 (defvar *bad* nil)
 (defvar *old-vector*)
 (defvar *old-conses*)
@@ -100,8 +112,10 @@
     (loop until *stop* do
       (let* ((tag (+ seed (* 8 (random 1000000 state))))
              (i (random *slots* state)))
-        (setf (svref *old-vector* i) (make-item tag))
-        (setf (car (svref *old-conses* i)) (make-item (1+ tag)))
+        (let ((a (make-item tag)) (b (make-item (1+ tag))))
+          (published
+            (setf (svref *old-vector* i) a)
+            (setf (car (svref *old-conses* i)) b)))
         (when (zerop (mod n 64))
           (setf (gethash (mod tag 2048) *table*) (make-item tag)))
         (incf n)))
@@ -110,11 +124,12 @@
 (defun check-worker ()
   (loop until *stop* do
     (dotimes (i *slots*)
-      (let ((x (svref *old-vector* i)))
+      (let ((x (published (svref *old-vector* i))))
         (unless (item-ok-p x) (note-bad "vector-slot" x)))
       (let ((c (svref *old-conses* i)))
         (if (consp c)
-            (unless (item-ok-p (car c)) (note-bad "old-cons-car" (car c)))
+            (let ((item (published (car c))))
+              (unless (item-ok-p item) (note-bad "old-cons-car" item)))
             (note-bad "old-cons" c))))
     (maphash (lambda (k v)
                (declare (ignore k))
