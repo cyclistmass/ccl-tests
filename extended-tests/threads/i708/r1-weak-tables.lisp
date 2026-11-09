@@ -13,11 +13,14 @@
 (defun weak-arg (w) (and *weak* w))
 ;; "noweak" makes the same four tables with no weakness: the control that
 ;; says whether weakness is the variable.
+;; "locked" makes the tables shared but not lock-free, to tell the
+;; lock-free algorithm from the weak processing.
+(defvar *lock-free* (if (flag "locked") nil :shared))
 (defvar *tables*
-  (list (make-hash-table :test 'eq    :weak (weak-arg :key)   :shared t)
-        (make-hash-table :test 'eq    :weak (weak-arg :value) :shared t)
-        (make-hash-table :test 'equal :weak (weak-arg :value) :shared t)
-        (make-hash-table :test 'eql   :weak (weak-arg :value) :shared t)))
+  (list (make-hash-table :test 'eq    :weak (weak-arg :key)   :shared t :lock-free *lock-free*)
+        (make-hash-table :test 'eq    :weak (weak-arg :value) :shared t :lock-free *lock-free*)
+        (make-hash-table :test 'equal :weak (weak-arg :value) :shared t :lock-free *lock-free*)
+        (make-hash-table :test 'eql   :weak (weak-arg :value) :shared t :lock-free *lock-free*)))
 ;; "keyonly" keeps only the weak-on-key EQ table.
 (when (flag "keyonly") (setq *tables* (list (first *tables*))))
 (defstruct item tag (payload (make-array 5 :initial-element 0)))
@@ -47,8 +50,8 @@
           (logior ccl::*gc-event-status-bits* (ash 1 2))))
   ;; "noegc" turns the ephemeral GC off, so every GC is a full one.
   (when (flag "noegc") (ccl:egc nil))
-  (format t "~&R1 check ~s weak ~s tables ~d egc ~s~%" (logbitp 2 ccl::*gc-event-status-bits*) *weak*
-          (length *tables*) (ccl:egc-enabled-p))
+  (format t "~&R1 check ~s weak ~s tables ~d egc ~s lock-free ~s~%" (logbitp 2 ccl::*gc-event-status-bits*) *weak*
+          (length *tables*) (ccl:egc-enabled-p) (ccl::hash-lock-free-p (first *tables*)))
   (finish-output)
   (dotimes (i 1000) (dolist (h *tables*) (setf (gethash (make-item :tag i) h) (mk i))))
   (ccl:gc)                                        ; tenure the four hash vectors
