@@ -30,8 +30,13 @@
                      h))
           (incf n))))))
 (defun run ()
-  (setq ccl::*gc-event-status-bits*
-        (logior ccl::*gc-event-status-bits* (ash 1 2)))
+  ;; "nocheck" leaves the kernel's GC integrity check off, to tell a check
+  ;; that fires on a legitimate weak forward from real damage.
+  (unless (member "nocheck" ccl:*command-line-argument-list* :test #'equal)
+    (setq ccl::*gc-event-status-bits*
+          (logior ccl::*gc-event-status-bits* (ash 1 2))))
+  (format t "~&R1 check ~s~%" (logbitp 2 ccl::*gc-event-status-bits*))
+  (finish-output)
   (dotimes (i 1000) (dolist (h *tables*) (setf (gethash (make-item :tag i) h) (mk i))))
   (ccl:gc)                                        ; tenure the four hash vectors
   (let ((procs (loop for i below 8 collect
