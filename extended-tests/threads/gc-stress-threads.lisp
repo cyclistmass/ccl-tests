@@ -50,9 +50,26 @@
            (= (length (cdr x)) (mod (car x) 17))
            (every (lambda (e) (eql e (car x))) (cdr x)))))
 
+(defun describe-item (x)
+  (ignore-errors
+   (if (consp x)
+       (let ((d (cdr x)))
+         (format nil "car=~s cdr-type=~s~@[ len=~d~]~@[ elt0=~s~]"
+                 (car x) (type-of d)
+                 (and (simple-vector-p d) (length d))
+                 (and (simple-vector-p d) (plusp (length d)) (svref d 0))))
+       (format nil "type=~s" (type-of x)))))
+
+;;; A bad read is either a store another core sees before the stores that
+;;; filled the object (a visibility race in this file), or damage to the
+;;; heap.  Read the SAME object again after a pause: a visibility race
+;;; resolves, damage stays.
 (defun note-bad (what x)
   (unless *bad*
-    (setq *bad* (format nil "~a ~s" what (ignore-errors (type-of x))))))
+    (let ((first (describe-item x)))
+      (sleep 0.2)
+      (setq *bad* (format nil "~a [~a] later=~a [~a]" what first
+                          (if (item-ok-p x) "OK" "BAD") (describe-item x))))))
 
 (defun sum-list (l)
   (let ((s 0)) (dolist (e l s) (incf s e))))
