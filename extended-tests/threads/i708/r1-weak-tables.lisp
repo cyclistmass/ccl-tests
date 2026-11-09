@@ -5,7 +5,11 @@
 (defvar *bad* nil)
 ;; CCL: "Only EQ hash tables can be weak" unless :weak :value
 ;; (read: level-0/l0-hash.lisp 489-500), so weak-on-key tables are EQ only.
-(defvar *weak* (not (member "noweak" ccl:*command-line-argument-list* :test #'equal)))
+;; Flags come from the command line, or from a wrapper that sets *R1-FLAGS*
+;; first (fork CI passes no arguments).
+(defvar *r1-flags* ccl:*command-line-argument-list*)
+(defun flag (f) (member f *r1-flags* :test #'equal))
+(defvar *weak* (not (flag "noweak")))
 (defun weak-arg (w) (and *weak* w))
 ;; "noweak" makes the same four tables with no weakness: the control that
 ;; says whether weakness is the variable.
@@ -36,14 +40,14 @@
 (defun run ()
   ;; "nocheck" leaves the kernel's GC integrity check off, to tell a check
   ;; that fires on a legitimate weak forward from real damage.
-  (unless (member "nocheck" ccl:*command-line-argument-list* :test #'equal)
+  (unless (flag "nocheck")
     (setq ccl::*gc-event-status-bits*
           (logior ccl::*gc-event-status-bits* (ash 1 2))))
   (format t "~&R1 check ~s weak ~s~%" (logbitp 2 ccl::*gc-event-status-bits*) *weak*)
   (finish-output)
   (dotimes (i 1000) (dolist (h *tables*) (setf (gethash (make-item :tag i) h) (mk i))))
   (ccl:gc)                                        ; tenure the four hash vectors
-  (let ((procs (loop for i below 8 collect
+  (let ((procs (loop for i below (if (flag "one") 1 8) collect
                  (ccl:process-run-function (format nil "w~d" i) (lambda () (worker i))))))
     (loop repeat *duration* until *stop* do (sleep 1))
     (setq *stop* t) (mapc #'ccl:join-process procs)
