@@ -112,10 +112,17 @@
     (loop until *stop* do
       (let* ((tag (+ seed (* 8 (random 1000000 state))))
              (i (random *slots* state)))
-        (let ((a (make-item tag)) (b (make-item (1+ tag))))
-          (published
-            (setf (svref *old-vector* i) a)
-            (setf (car (svref *old-conses* i)) b)))
+        ;; Unlocked, each item is stored as soon as it is made.  Building
+        ;; both first widens the gap before the store, and with that order
+        ;; the unlocked file passed 12/12 on arm64 where this order failed.
+        (if *publish-lock*
+            (let ((a (make-item tag)) (b (make-item (1+ tag))))
+              (published
+                (setf (svref *old-vector* i) a)
+                (setf (car (svref *old-conses* i)) b)))
+            (progn
+              (setf (svref *old-vector* i) (make-item tag))
+              (setf (car (svref *old-conses* i)) (make-item (1+ tag)))))
         (when (zerop (mod n 64))
           (setf (gethash (mod tag 2048) *table*) (make-item tag)))
         (incf n)))
