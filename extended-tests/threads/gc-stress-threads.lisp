@@ -23,11 +23,17 @@
 (defpackage "GC-STRESS" (:use "CL"))
 (in-package "GC-STRESS")
 
-(defparameter *duration* 60)
-(defparameter *de-workers* 3)
-(defparameter *store-workers* 3)
-(defparameter *check-workers* 2)
-(defparameter *slots* 4096)
+;;; DEFVAR, so a file that loads this one can set them first.
+(defvar *duration* 60)
+(defvar *de-workers* 3)
+(defvar *store-workers* 3)
+(defvar *check-workers* 2)
+(defvar *slots* 4096)
+(defvar *de-max* 200)
+;;; Threads that interrupt the workers at random with a function that
+;;; conses and stack-allocates, so GCs also land in interrupt frames.
+(defvar *interrupters* 0)
+(defvar *interrupt-count* 0)
 
 (defvar *stop* nil)
 
@@ -102,7 +108,7 @@
 (defun de-worker ()
   (let ((acc 0) (n 0))
     (loop until *stop* do
-      (incf acc (de-step (1+ (random 200))))
+      (incf acc (de-step (1+ (random *de-max*))))
       (incf n))
     (atomic-incf-de n)
     acc))
@@ -154,6 +160,21 @@
           (setq *worker-error* (princ-to-string c)))
         (setq *stop* t)))))
 
+(defun interrupt-payload ()
+  (let ((l (make-list 32 :initial-element 3)))
+    (declare (dynamic-extent l))
+    (setq *interrupt-payload-sink* (cons (sum-list l) (make-array 8)))))
+(defvar *interrupt-payload-sink* nil)
+
+(defun interrupter (targets)
+  (let ((n 0) (v (coerce targets 'simple-vector)))
+    (loop until *stop* do
+      (let ((p (svref v (random (length v)))))
+        (ignore-errors (ccl:process-interrupt p #'interrupt-payload))
+        (incf n)
+        (sleep 0.001)))
+    (ccl:with-lock-grabbed (*count-lock*) (incf *interrupt-count* n))))
+
 (defvar *count-lock* (ccl:make-lock))
 (defun atomic-incf-de (n) (ccl:with-lock-grabbed (*count-lock*) (incf *de-count* n)))
 (defun atomic-incf-store (n) (ccl:with-lock-grabbed (*count-lock*) (incf *store-count* n)))
@@ -178,6 +199,11 @@
         (push (ccl:process-run-function (format nil "store-~d" i)
                                         (guarded (lambda () (store-worker seed))))
               procs)))
+    (let ((targets (copy-list procs)))
+      (dotimes (i *interrupters*)
+        (push (ccl:process-run-function (format nil "interrupter-~d" i)
+                                        (guarded (lambda () (interrupter targets))))
+              procs)))
     (dotimes (i *check-workers*)
       (push (ccl:process-run-function (format nil "check-~d" i) (guarded #'check-worker)) procs))
     (let ((end (+ (get-universal-time) *duration*)))
@@ -188,8 +214,8 @@
     (let ((verdict (cond (*worker-error* "WORKER-ERROR")
                          (*bad* "BAD-SHAPE")
                          (t "PASS"))))
-      (format t "~&GC-STRESS-RESULT :VERDICT ~a :GCS ~a :EGC ~a :STORES ~d :DE ~d~@[ :WHAT ~a~]~%"
-              verdict (gc-count) (ccl:egc-enabled-p) *store-count* *de-count*
+      (format t "~&GC-STRESS-RESULT :VERDICT ~a :GCS ~a :EGC ~a :STORES ~d :DE ~d :INTERRUPTS ~d~@[ :WHAT ~a~]~%"
+              verdict (gc-count) (ccl:egc-enabled-p) *store-count* *de-count* *interrupt-count*
               (or *worker-error* *bad*))
       (finish-output)
       (ccl:quit (if (string= verdict "PASS") 0 1)))))
