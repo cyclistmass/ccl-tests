@@ -5,11 +5,15 @@
 (defvar *bad* nil)
 ;; CCL: "Only EQ hash tables can be weak" unless :weak :value
 ;; (read: level-0/l0-hash.lisp 489-500), so weak-on-key tables are EQ only.
+(defvar *weak* (not (member "noweak" ccl:*command-line-argument-list* :test #'equal)))
+(defun weak-arg (w) (and *weak* w))
+;; "noweak" makes the same four tables with no weakness: the control that
+;; says whether weakness is the variable.
 (defvar *tables*
-  (list (make-hash-table :test 'eq    :weak :key   :shared t)
-        (make-hash-table :test 'eq    :weak :value :shared t)
-        (make-hash-table :test 'equal :weak :value :shared t)   ; EQUAL derefs keys on rehash
-        (make-hash-table :test 'eql   :weak :value :shared t)))
+  (list (make-hash-table :test 'eq    :weak (weak-arg :key)   :shared t)
+        (make-hash-table :test 'eq    :weak (weak-arg :value) :shared t)
+        (make-hash-table :test 'equal :weak (weak-arg :value) :shared t)
+        (make-hash-table :test 'eql   :weak (weak-arg :value) :shared t)))
 (defstruct item tag (payload (make-array 5 :initial-element 0)))
 ;; An item whose payload holds its tag, so ITEM-OK-P can check it.
 (defun mk (tag) (let ((i (make-item :tag tag))) (setf (svref (item-payload i) 0) tag) i))
@@ -26,7 +30,7 @@
           (when (zerop (mod n 7)) (remhash k h))
           (when (zerop (mod n 1000))              ; force rehash + key-moved handling
             (maphash (lambda (k v) (declare (ignore k))
-                       (unless (item-ok-p v) (setq *bad* (format nil "table ~a" h)) (setq *stop* t)))
+                       (unless (item-ok-p v) (setq *bad* (format nil "table ~a weak ~s value ~s" h (ignore-errors (ccl:hash-table-weak-p h)) (ignore-errors (prin1-to-string v)))) (setq *stop* t)))
                      h))
           (incf n))))))
 (defun run ()
@@ -35,7 +39,7 @@
   (unless (member "nocheck" ccl:*command-line-argument-list* :test #'equal)
     (setq ccl::*gc-event-status-bits*
           (logior ccl::*gc-event-status-bits* (ash 1 2))))
-  (format t "~&R1 check ~s~%" (logbitp 2 ccl::*gc-event-status-bits*))
+  (format t "~&R1 check ~s weak ~s~%" (logbitp 2 ccl::*gc-event-status-bits*) *weak*)
   (finish-output)
   (dotimes (i 1000) (dolist (h *tables*) (setf (gethash (make-item :tag i) h) (mk i))))
   (ccl:gc)                                        ; tenure the four hash vectors
