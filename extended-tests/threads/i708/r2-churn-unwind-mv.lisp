@@ -2,6 +2,9 @@
 (in-package :cl-user)
 (defvar *duration* 90) (defvar *stop* nil) (defvar *bad* nil)
 (defvar *old* (make-array 1024 :initial-element nil))
+;; Lists pushed by MV-DX live apart from the single conses in *OLD*, so
+;; every slot of *PUSHED* is a proper list.
+(defvar *pushed* (make-array 1024 :initial-element nil))
 (defvar *special* 0)
 (defun shape-ok (x) (and (consp x) (simple-vector-p (cdr x)) (eql (car x) (svref (cdr x) 0))))
 (defun mv-dx (n)
@@ -9,7 +12,7 @@
     (declare (dynamic-extent l))
     (multiple-value-prog1 (values (make-array 2) (length l) (cons n (make-array 1 :initial-element n)))
       (progv '(*special*) (list n)              ; progvsave tstack frame
-        (push (cons n (make-array 1 :initial-element n)) (svref *old* (mod n 1024)))))))
+        (push (cons n (make-array 1 :initial-element n)) (svref *pushed* (mod n 1024)))))))
 (defun body (seed)
   (let ((n 0))
     (dotimes (i 2000)
@@ -28,8 +31,11 @@
   (loop until *stop* do
     (dotimes (i 1024)
       (let ((x (svref *old* i)))
-        (unless (or (null x) (shape-ok x) (and (consp x) (every #'shape-ok x)))
-          (setq *bad* (format nil "slot ~d" i) *stop* t))))))
+        (unless (or (null x) (shape-ok x))
+          (setq *bad* (format nil "old slot ~d" i) *stop* t)))
+      (let ((l (svref *pushed* i)))
+        (unless (every #'shape-ok l)
+          (setq *bad* (format nil "pushed slot ~d" i) *stop* t))))))
 (defun run ()
   (setq ccl::*gc-event-status-bits*
         (logior ccl::*gc-event-status-bits* (ash 1 2)))
@@ -43,6 +49,6 @@
         (dolist (p ps) (ccl:process-interrupt p (lambda () (mv-dx 16))))   ; interrupt during DX/MV
         (mapc #'ccl:join-process ps) (incf born 8)))
     (setq *stop* t) (ccl:join-process chk)
-    (format t "~&R2 :VERDICT ~a :THREADS ~d :GCS ~a~%" (if *bad* "BAD-SHAPE" "PASS") born (ccl:gccounts))
+    (format t "~&R2 :VERDICT ~a :THREADS ~d :GCS ~a~@[ :WHAT ~a~]~%" (if *bad* "BAD-SHAPE" "PASS") born (ccl:gccounts) *bad*)
     (ccl:quit (if *bad* 1 0))))
 (run)
