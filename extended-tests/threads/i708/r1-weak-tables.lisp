@@ -8,6 +8,9 @@
 ;; Flags come from the command line, or from a wrapper that sets *R1-FLAGS*
 ;; first (fork CI passes no arguments).
 (defvar *r1-flags* ccl:*command-line-argument-list*)
+;; A wrapper can set *ON-FAULT* to a function of (condition table key),
+;; called before the fault unwinds.
+(defvar *on-fault* nil)
 (defun flag (f) (member f *r1-flags* :test #'equal))
 (defvar *weak* (not (flag "noweak")))
 (defun weak-arg (w) (and *weak* w))
@@ -39,7 +42,9 @@
         (let* ((tag (+ seed (* 8 (random 100000 rs))))
                (k (if (eq (hash-table-test h) 'equal) (list tag) (make-item :tag tag)))
                (v (let ((i (make-item :tag tag))) (setf (svref (item-payload i) 0) tag) i)))
-          (setf (gethash k h) v)                 ; key or value dies at once: weak slot churn
+          (handler-bind ((ccl::invalid-memory-access
+                           (lambda (c) (when *on-fault* (funcall *on-fault* c h k)))))
+            (setf (gethash k h) v))              ; key or value dies at once: weak slot churn
           (when (zerop (mod n 7)) (remhash k h))
           (when (zerop (mod n 1000))              ; force rehash + key-moved handling
             (maphash (lambda (k v) (declare (ignore k))
@@ -59,6 +64,8 @@
   (finish-output)
   (dotimes (i 1000) (dolist (h *tables*) (setf (gethash (make-item :tag i) h) (mk i))))
   (ccl:gc)                                        ; tenure the four hash vectors
+  ;; "diagnow" runs the fault hook once here, as its positive control.
+  (when (and *on-fault* (flag "diagnow")) (funcall *on-fault* :selftest (first *tables*) nil))
   (let ((procs (loop for i below (if (flag "one") 1 8) collect
                  (ccl:process-run-function (format nil "w~d" i) (lambda () (worker i))))))
     (loop repeat *duration* until *stop* do (sleep 1))
