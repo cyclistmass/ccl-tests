@@ -20,7 +20,10 @@
 ;; lock-free algorithm from the weak processing.
 (defvar *lock-free* (if (flag "locked") nil :shared))
 (defvar *tables*
-  (list (make-hash-table :test 'eq    :weak (weak-arg :key)   :shared t :lock-free *lock-free*)
+  ;; "bigkey" sizes the weak-on-key table so it never grows: its vector is
+  ;; made once, before the churn, so issue #708 has no window on it.
+  (list (apply #'make-hash-table :test 'eq :weak (weak-arg :key) :shared t :lock-free *lock-free*
+               (and (flag "bigkey") (list :size 400000)))
         (make-hash-table :test 'eq    :weak (weak-arg :value) :shared t :lock-free *lock-free*)
         (make-hash-table :test 'equal :weak (weak-arg :value) :shared t :lock-free *lock-free*)
         (make-hash-table :test 'eql   :weak (weak-arg :value) :shared t :lock-free *lock-free*)))
@@ -70,6 +73,7 @@
                  (ccl:process-run-function (format nil "w~d" i) (lambda () (worker i))))))
     (loop repeat *duration* until *stop* do (sleep 1))
     (setq *stop* t) (mapc #'ccl:join-process procs)
-    (format t "~&R1 :VERDICT ~a :GCS ~a~@[ :WHAT ~a~]~%" (if *bad* "BAD-SHAPE" "PASS") (ccl:gccounts) *bad*)
+    (format t "~&R1 :VERDICT ~a :GCS ~a :KEY-SLOTS ~d~@[ :WHAT ~a~]~%" (if *bad* "BAD-SHAPE" "PASS") (ccl:gccounts)
+            (ccl::uvsize (ccl::nhash.vector (first *tables*))) *bad*)
     (ccl:quit (if *bad* 1 0))))
 (run)
