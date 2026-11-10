@@ -1,10 +1,11 @@
 ;;; r1-catch.lisp -- catch the bad table key at the moment EQUAL gets it.
 ;;; Every EQUAL table gets a compare function that classifies the table
 ;;; key by its raw bits before it calls EQUAL.  An EQUAL key in R1 is a
-;;; cons in a consing area, so any other bits (except the free marker)
-;;; are a bad key.  On the first bad key it records the raw word, where
-;;; that word sits in the table now, the GC count and the call chain,
-;;; and stops the run with BAD-SHAPE instead of calling EQUAL on it.
+;;; cons (the churn) or an ITEM (the first fill), at or above the lowest
+;;; consing area, so any other bits (except the free marker) are a bad
+;;; key.  On the first bad key it records the raw word, where that word
+;;; sits in the table now, the GC count and the call chain, and stops
+;;; the run with BAD-SHAPE instead of calling EQUAL on it.
 (in-package :cl-user)
 (load (merge-pathnames "r1-diag.lisp" *load-truename*))
 (defvar *catch-lowest* nil)
@@ -12,9 +13,10 @@
 (defvar *catch-free* 0)
 (defvar *catch-done* nil)
 (defun catch-class (w)
-  ;; :FREE for the free marker, :OK for a cons in a consing area, else :BAD.
+  ;; :FREE for the free marker, :OK for a cons or uvector pointer at or
+  ;; above the lowest consing area, else :BAD.
   (cond ((eql w (ccl::%address-of (ccl::%unbound-marker))) :free)
-        ((and (= (logand w target::fulltagmask) target::fulltag-cons)
+        ((and (member (logand w target::fulltagmask) (list target::fulltag-cons target::fulltag-misc))
               (>= w *catch-lowest*))
          :ok)
         (t :bad)))
@@ -49,11 +51,12 @@
       (t (catch-report a b w) nil))))
 (defun catch-install (tables)
   (setq *catch-lowest* (reduce #'min (mapcar #'car (diag-areas))))
-  ;; Positive control: a small cons-tagged word is :BAD, a real cons is
-  ;; :OK, the free marker is :FREE.
-  (format t "~&CATCH selftest ~s ~s ~s lowest #x~x~%"
+  ;; Positive control: a small cons-tagged word is :BAD, a real cons and
+  ;; a real ITEM are :OK, the free marker is :FREE.
+  (format t "~&CATCH selftest ~s ~s ~s ~s lowest #x~x~%"
           (catch-class (+ #x20 target::fulltag-cons))
           (catch-class (ccl::%address-of (list 1)))
+          (catch-class (ccl::%address-of (make-item :tag 1)))
           (catch-class (ccl::%address-of (ccl::%unbound-marker)))
           *catch-lowest*)
   (dolist (h tables)
