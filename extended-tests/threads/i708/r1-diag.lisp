@@ -21,7 +21,7 @@
         (t :outside)))
 (defun diag-copy (v)
   ;; Return (values raw-slot-words data-address) for the gvector V.
-  (let* ((w (diag-word)) (n (length v))
+  (let* ((w (diag-word)) (n (ccl::uvsize v))
          (dest (make-array n :element-type (if (= w 8) '(unsigned-byte 64) '(unsigned-byte 32))))
          (addr 0))
     (ccl::with-macptrs ((p))
