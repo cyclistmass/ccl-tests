@@ -23,6 +23,8 @@
         (make-hash-table :test 'eql   :weak (weak-arg :value) :shared t :lock-free *lock-free*)))
 ;; "keyonly" keeps only the weak-on-key EQ table.
 (when (flag "keyonly") (setq *tables* (list (first *tables*))))
+;; "equalonly" keeps only the weak-on-value EQUAL table.
+(when (flag "equalonly") (setq *tables* (list (third *tables*))))
 (defstruct item tag (payload (make-array 5 :initial-element 0)))
 ;; An item whose payload holds its tag, so ITEM-OK-P can check it.
 (defun mk (tag) (let ((i (make-item :tag tag))) (setf (svref (item-payload i) 0) tag) i))
