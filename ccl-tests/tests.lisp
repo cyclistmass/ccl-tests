@@ -75,3 +75,77 @@
             unless (eql got (* x d))
               collect x))
   nil)
+
+;;; An integer that rounds up to 2^1024 (or 2^128) became an infinity
+;;; instead of signalling FLOATING-POINT-OVERFLOW.
+(deftest ccl.issue#748
+    (loop for (x proto) in (list (list (- (expt 2 1024) (expt 2 970)) 0d0)
+                                 (list (1- (expt 2 1024)) 0d0)
+                                 (list (- 1 (expt 2 1024)) 0d0)
+                                 (list (- (expt 2 1024) (/ (expt 2 970) 3)) 0d0)
+                                 (list (1- (expt 2 128)) 1f0)
+                                 (list (- 1 (expt 2 128)) 1f0))
+          unless (eq :overflow
+                     (handler-case (float x proto)
+                       (floating-point-overflow () :overflow)))
+            collect (list x proto))
+  nil)
+
+;;; The largest finite values must still convert.
+(deftest ccl.issue#748.finite
+    (list (float (+ 1 (- (expt 2 1024) (expt 2 971))) 0d0)
+          (float (- (expt 2 128) (expt 2 104)) 1f0))
+  (#.most-positive-double-float #.most-positive-single-float))
+
+;;; (MEMBER #c(1 2)) also held other complex numbers.
+(deftest ccl.issue#749
+    (list (typep #c(1 1) '(member #c(1 2)))
+          (typep #c(1 1) '(eql #c(1 2)))
+          (typep #c(2 1) '(member #c(1 2)))
+          (typep #c(1.0 1.0) '(member #c(1.0 2.0)))
+          (typep #c(1 2) '(member #c(1 2)))
+          (typep #c(1 1) '(and (member #c(1 1)) (not (member #c(1 2)))))
+          (multiple-value-list (subtypep '(member #c(1 1)) '(member #c(1 2))))
+          (funcall (compile nil '(lambda (x)
+                                  (declare (type (and (member #c(1 1))
+                                                      (not (member #c(1 2))))
+                                                 x))
+                                  (if (eql x #c(1 1)) 'yes 'no)))
+                   #c(1 1)))
+  (nil nil nil nil t t (nil t) yes))
+
+;;; A local inline function was replaced by a global inline function of
+;;; the same name.
+(declaim (inline issue-750-foo))
+(defun issue-750-foo (x) (cons 'global x))
+
+(deftest ccl.issue#750
+    (list (funcall (compile nil '(lambda (x)
+                                  (flet ((issue-750-foo (y) (cons 'local y)))
+                                    (declare (inline issue-750-foo))
+                                    (issue-750-foo x))))
+                   1)
+          (funcall (compile nil '(lambda (x)
+                                  (labels ((issue-750-foo (y) (cons 'local y)))
+                                    (declare (inline issue-750-foo))
+                                    (issue-750-foo (issue-750-foo x)))))
+                   1)
+          (funcall (compile nil '(lambda (x) (issue-750-foo x))) 1))
+  ((local . 1) (local local . 1) (global . 1)))
+
+;;; PRINC doubled a backslash in a symbol name when *PRINT-CASE* was not
+;;; the readtable case.
+(deftest ccl.issue#751
+    (flet ((pr (sym case)
+             (let ((*print-escape* nil)
+                   (*print-readably* nil)
+                   (*print-case* case))
+               (princ-to-string sym))))
+      (list (pr '|A\\b| :upcase)
+            (pr '|A\\b| :downcase)
+            (pr '|a\\b| :downcase)
+            (pr '|A\\B| :capitalize)
+            (pr '|a\\b| :capitalize)
+            (let ((*package* (symbol-package '|A\\b|)))
+              (prin1-to-string '|A\\b|))))
+  ("A\\b" "a\\b" "a\\b" "A\\B" "a\\b" "|A\\\\b|"))
