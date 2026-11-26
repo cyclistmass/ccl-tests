@@ -4,6 +4,17 @@
 ;;; predicate uses, in the same process, and print one RESULT line.
 ;;; Exit 1 when FORMAT.B.9 failed, so the CI tally counts it.
 
+;;; Delete the test fasls first, as `make test' does, so this process
+;;; compiles every test file before it runs them.
+(let ((fasls (directory
+              (merge-pathnames
+               (make-pathname :directory '(:relative :up "ansi-tests" :wild-inferiors)
+                              :name :wild
+                              :type (pathname-type ccl:*.fasl-pathname*))
+               *load-truename*))))
+  (mapc #'delete-file fasls)
+  (format t "~&KI317 deleted ~d fasls~%" (length fasls)))
+
 (load (merge-pathnames (make-pathname :directory '(:relative :up)
                                       :name "load" :type "lisp")
                        *load-truename*))
