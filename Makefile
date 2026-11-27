@@ -2,7 +2,7 @@ CCL=ccl
 
 test:
 	make clean
-	$(CCL) --no-init --batch -l load.lisp -e "(run-tests :exit t)"
+	$(CCL) --no-init --batch -e '(progn (ccl:configure-egc 64 128 256) (format t "~&KI317 GC egc=~s config=~s~%" (ccl:egc-active-p) (multiple-value-list (ccl:egc-configuration))))' -l load.lisp -e "(run-tests :exit t)"
 
 test-ccl:
 	make clean
