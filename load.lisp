@@ -28,6 +28,10 @@
 	(failed (find-symbol "*FAILED-TESTS*" "RT")))
     (time (funcall do-tests :compile compile :verbose verbose :catch-errors t))
     (let ((failed-tests (symbol-value failed)))
+      (when (find "FORMAT.B.9" failed-tests :key #'symbol-name :test #'string=)
+        (load "tests:extended-tests;ki317-probes.lisp")
+        (format t "~&KI317 RESULT b9=FAIL ~s~%" (funcall (find-symbol "KI317-PROBES" "CL-USER")))
+        (finish-output))
       (when exit
 	(ccl:quit (if failed-tests 1 0)))
       failed-tests)))
